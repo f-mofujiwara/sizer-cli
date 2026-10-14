@@ -20,6 +20,7 @@ import {
   PreflightError,
   REDACT_PATTERN,
   ENV_TOKEN,
+  ENV_TOKEN_AZURE,
   __resetRedactor,
 } from '../preflight.js';
 
@@ -44,6 +45,50 @@ describe('resolveToken', () => {
       expect(msg).toContain('Metadata: Read-only');
       expect(msg).toContain('Pull requests: Read-only');
     }
+  });
+});
+
+describe('resolveToken (azure)', () => {
+  it('reads ADOPAT, not GHPAT, for an azure scope', () => {
+    const env = { [ENV_TOKEN]: 'gh-value', [ENV_TOKEN_AZURE]: 'ado-value' };
+    expect(ENV_TOKEN_AZURE).toBe('ADOPAT');
+    expect(resolveToken(undefined, env, 'azure')).toBe('ado-value');
+    expect(resolveToken(undefined, env, 'github')).toBe('gh-value');
+    expect(resolveToken(undefined, env)).toBe('gh-value');
+  });
+
+  it('does not fall back to GHPAT for an azure scope', () => {
+    expect(() => resolveToken(undefined, { [ENV_TOKEN]: 'gh-value' }, 'azure')).toThrow(
+      PreflightError
+    );
+  });
+
+  it('still honours --token', () => {
+    expect(resolveToken('flag-value', {}, 'azure')).toBe('flag-value');
+  });
+
+  it('throws an Azure-specific error with the click-path', () => {
+    try {
+      resolveToken(undefined, { [ENV_TOKEN]: 'gh-value' }, 'azure');
+      throw new Error('expected throw');
+    } catch (err) {
+      const msg = (err as Error).message;
+      expect(msg).toContain('Azure DevOps PAT');
+      expect(msg).toContain(ENV_TOKEN_AZURE);
+      expect(msg).toContain('Code: Read');
+      expect(msg).not.toContain('GitHub');
+      expect(msg).not.toContain(ENV_TOKEN + '.');
+    }
+  });
+
+  it('preflight threads the provider through', async () => {
+    await expect(
+      preflight({
+        provider: 'azure',
+        env: { [ENV_TOKEN_AZURE]: 'ado-value' },
+        checkGit: async () => {},
+      })
+    ).resolves.toEqual({ token: 'ado-value' });
   });
 });
 
@@ -91,6 +136,16 @@ describe('redactString / REDACT_PATTERN', () => {
   it('does not change strings without credentials', () => {
     expect(redactString('clone failed: connection refused')).toBe(
       'clone failed: connection refused'
+    );
+  });
+
+  it('replaces credentials in an Azure DevOps clone URL', () => {
+    expect(
+      redactString(
+        'fatal: unable to access https://x-access-token:abc123def@dev.azure.com/acme/My%20Project/_git/the%20repo/'
+      )
+    ).toBe(
+      'fatal: unable to access https://x-access-token:***@dev.azure.com/acme/My%20Project/_git/the%20repo/'
     );
   });
 

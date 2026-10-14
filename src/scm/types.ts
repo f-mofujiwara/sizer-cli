@@ -19,6 +19,7 @@ export interface RepoListing {
   /**
    * HTTPS clone URL with PAT credentials already injected, ready for
    * `git clone`. Format: `https://x-access-token:<token>@<host>/<path>.git`.
+   * Azure DevOps has no `.git`: `https://x-access-token:<token>@dev.azure.com/<org>/<project>/_git/<repo>`.
    *
    * **MUST NEVER BE LOGGED.** The preflight log redactor scrubs the token,
    * but defence in depth: callers should treat this as a secret.
@@ -37,9 +38,9 @@ export interface RepoListing {
 }
 
 /**
- * Scope to enumerate. v1 only implements GitHub; the other variants are
- * placeholders so the interface is part of the codebase from day 1 (and
- * callers don't have to be retro-fitted when GitLab/Bitbucket/Azure land).
+ * Scope to enumerate. GitHub and Azure DevOps are implemented; the other
+ * variants are placeholders so the interface is part of the codebase from day 1
+ * (and callers don't have to be retro-fitted when GitLab/Bitbucket land).
  */
 export type ScmScope =
   | { provider: 'github'; type: 'all' }
@@ -68,7 +69,7 @@ export interface ScmEnumerator {
 
   /**
    * Optional: fetch aggregated pull-request sizing facts for one repo.
-   * GitHub implements this; other providers leave it undefined in v1.
+   * GitHub and Azure DevOps implement this; other providers leave it undefined.
    */
   fetchPullRequestStats?(
     fullName: string,

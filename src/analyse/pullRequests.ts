@@ -1,8 +1,9 @@
 /**
- * Pull-request sizing facts derived from GitHub PR metadata.
+ * Pull-request sizing facts derived from GitHub / Azure DevOps PR metadata.
  *
  * Aggregation is pure so unit tests can pin window math without Octokit.
- * Fetching lives on {@link GitHubEnumerator.fetchPullRequestStats}.
+ * Fetching lives on {@link GitHubEnumerator.fetchPullRequestStats} and
+ * {@link AzureDevOpsEnumerator.fetchPullRequestStats}.
  *
  * Window semantics: a PR counts in a window when its `createdAt` is on or
  * after (now - window). Month windows use 30-day months (90 / 365 / 730 days
@@ -13,7 +14,7 @@ const MS_PER_DAY = 24 * 60 * 60 * 1000;
 
 export type PullRequestState = 'OPEN' | 'CLOSED' | 'MERGED';
 
-/** Minimal PR node shape from the GitHub GraphQL `pullRequests` connection. */
+/** Minimal PR node shape, normalised from each provider's PR listing. */
 export interface PullRequestNode {
   number: number;
   state: PullRequestState;

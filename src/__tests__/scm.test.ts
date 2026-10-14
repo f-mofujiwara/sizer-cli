@@ -18,6 +18,7 @@ import {
   parseScope,
   createEnumerator,
   resolveScope,
+  scopeProvider,
   ScopeParseError,
 } from '../scm/factory.js';
 import { defaultIncluded } from '../scm/types.js';
@@ -133,6 +134,30 @@ describe('parseScope', () => {
     expect(() => parseScope('codeberg:org=acme')).toThrow(/codeberg/);
   });
 
+  it('treats an azure: prefix with no body as a (failing) GitHub scope, like parseScope', () => {
+    expect(scopeProvider('azure:org=acme')).toBe('azure');
+    expect(scopeProvider(' AZURE:org=acme ')).toBe('azure');
+    expect(scopeProvider('azure:')).toBe('github');
+    expect(scopeProvider('acme')).toBe('github');
+    expect(() => parseScope('azure:')).toThrow(ScopeParseError);
+  });
+
+  it('points unknown-provider users at the azure scope syntax', () => {
+    expect(() => parseScope('codeberg:org=acme')).toThrow(/Azure DevOps is available now as "azure:org=/);
+  });
+
+  it('parses azure org and project scopes, and rejects malformed ones', () => {
+    expect(parseScope('azure:org=acme')).toEqual({ provider: 'azure', organization: 'acme' });
+    expect(parseScope('azure:org=acme/project=My Project')).toEqual({
+      provider: 'azure',
+      organization: 'acme',
+      project: 'My Project',
+    });
+    for (const bad of ['azure:acme', 'azure:org=', 'azure:org=acme/project=a/b']) {
+      expect(() => parseScope(bad), bad).toThrow(/azure:org=<organisation>/);
+    }
+  });
+
   it('parses a v2 gitlab scope (still typed) so factory can return the stub', () => {
     expect(parseScope('gitlab:group=foo')).toEqual({
       provider: 'gitlab',
@@ -151,7 +176,7 @@ describe('createEnumerator', () => {
     expect(createEnumerator(scope, TOKEN)).toBeInstanceOf(GitHubEnumerator);
   });
 
-  it('returns the v2 stub for gitlab/bitbucket/azure', () => {
+  it('returns the v2 stub for gitlab/bitbucket and the real enumerator for azure', () => {
     expect(createEnumerator(parseScope('gitlab:group=foo'), TOKEN)).toBeInstanceOf(
       GitLabEnumerator
     );
@@ -164,7 +189,7 @@ describe('createEnumerator', () => {
   });
 });
 
-describe('v2 stubs', () => {
+describe('v2 stubs (gitlab, bitbucket)', () => {
   it('GitLab stub throws "not implemented"', async () => {
     await expect(
       new GitLabEnumerator().enumerate(
@@ -183,13 +208,22 @@ describe('v2 stubs', () => {
     ).rejects.toThrow(/not implemented/i);
   });
 
-  it('Azure stub throws "not implemented"', async () => {
-    await expect(
-      new AzureDevOpsEnumerator().enumerate(
-        { provider: 'azure', organization: 'foo' },
+  it('stubs point at a scope syntax that actually parses', async () => {
+    const stubs = [
+      new GitLabEnumerator().enumerate(
+        { provider: 'gitlab', group: 'foo' },
         { includeArchived: true, includeForks: true }
-      )
-    ).rejects.toThrow(/not implemented/i);
+      ),
+      new BitbucketEnumerator().enumerate(
+        { provider: 'bitbucket', workspace: 'foo' },
+        { includeArchived: true, includeForks: true }
+      ),
+    ];
+    for (const stub of stubs) {
+      await expect(stub).rejects.toThrow(/--scope github:acme/);
+      await expect(stub).rejects.not.toThrow(/github=/);
+    }
+    expect(parseScope('github:acme')).toMatchObject({ provider: 'github' });
   });
 });
 

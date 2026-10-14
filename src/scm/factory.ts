@@ -7,7 +7,7 @@
  *   "github:acme"          → same, explicit provider
  *   "gitlab:group=foo"     → v2; throws today
  *   "bitbucket:workspace=foo" → v2; throws today
- *   "azure:org=foo[/project=bar]" → v2; throws today
+ *   "azure:org=foo[/project=bar]" → Azure DevOps Services, whole org or one project
  */
 
 import { GitHubEnumerator } from './github.js';
@@ -39,6 +39,17 @@ export function resolveScope(raw?: string): ResolvedScope {
   }
 
   return { scope: parseScope(raw), usedDefault: false };
+}
+
+/**
+ * Cheap read of just the provider prefix of a raw `--scope`, for callers that
+ * need it before the full parse (token lookup). Anything that is not
+ * `azure:` is GitHub, matching `parseScope`'s default.
+ */
+export function scopeProvider(raw?: string): ScmScope['provider'] {
+  // An `azure:` with nothing after it is not an azure scope to parseScope
+  // either, so it stays on the GitHub side and fails as a scope error.
+  return /^azure:.+/i.test((raw ?? '').trim()) ? 'azure' : 'github';
 }
 
 export function parseScope(raw: string): ScmScope {
@@ -84,10 +95,10 @@ export function parseScope(raw: string): ScmScope {
       return { provider: 'bitbucket', workspace: m[1] };
     }
     case 'azure': {
-      const m = body.match(/^org=([^/]+)(?:\/project=(.+))?$/);
+      const m = body.match(/^org=([A-Za-z0-9][A-Za-z0-9-]*)(?:\/project=([^/]+))?$/);
       if (!m) {
         throw new ScopeParseError(
-          'Azure DevOps scope must be of the form "azure:org=<organisation>[/project=<project>]" (v2 — not yet implemented).'
+          'Azure DevOps scope must be of the form "azure:org=<organisation>[/project=<project>]".'
         );
       }
       return {
@@ -98,7 +109,7 @@ export function parseScope(raw: string): ScmScope {
     }
     default:
       throw new ScopeParseError(
-        `Unknown scope provider "${provider}". Supported v1: github (default). Planned v2: gitlab, bitbucket, azure.`
+        `Unknown scope provider "${provider}". Supported v1: github (default). Planned v2: gitlab, bitbucket, azure. Azure DevOps is available now as "azure:org=<org>[/project=<project>]".`
       );
   }
 }
@@ -148,6 +159,6 @@ export function createEnumerator(
     case 'bitbucket':
       return new BitbucketEnumerator();
     case 'azure':
-      return new AzureDevOpsEnumerator();
+      return new AzureDevOpsEnumerator(token, scope.organization);
   }
 }

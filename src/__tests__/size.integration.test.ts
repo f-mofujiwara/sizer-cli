@@ -11,8 +11,9 @@
  * mock for Octokit.
  */
 
-import { describe, expect, it, beforeAll, afterAll, vi } from 'vitest';
+import { describe, expect, it, beforeAll, afterAll, afterEach, vi } from 'vitest';
 import { simpleGit } from 'simple-git';
+import nock from 'nock';
 import {
   mkdtemp,
   rm,
@@ -25,6 +26,8 @@ import { join } from 'node:path';
 
 import { parseIgnoredRepos, runSizeCommand } from '../commands/size.js';
 import { EMPTY_PR_STATS } from '../analyse/pullRequests.js';
+import { writeSizedCsv } from '../reporting/csv.js';
+import { AzureDevOpsEnumerator } from '../scm/azure.js';
 
 vi.mock('../scm/factory.js', async (importActual) => {
   const actual: typeof import('../scm/factory.js') = await importActual();
@@ -155,6 +158,11 @@ describe('runSizeCommand — end-to-end against a local bare fixture', () => {
     expect(parseIgnoredRepos('acme/api, ACME/Web')).toEqual(
       new Set(['acme/api', 'acme/web'])
     );
+    // Azure DevOps names may contain spaces and non-ASCII characters; GitHub's can't.
+    expect(parseIgnoredRepos('日本語 リポ/x,My Project/repo', 'azure')).toEqual(
+      new Set(['日本語 リポ/x', 'my project/repo'])
+    );
+    expect(() => parseIgnoredRepos('My Project/repo')).toThrow(/owner\/repo/);
     expect(() => parseIgnoredRepos('acme/api,,acme/web')).toThrow(/empty entry/);
     expect(() => parseIgnoredRepos('not-a-full-name')).toThrow(/owner\/repo/);
   });
@@ -269,4 +277,103 @@ describe('runSizeCommand — end-to-end against a local bare fixture', () => {
     expect(result.rows[0].error).not.toContain(secret);
     expect(await readFile(outputPath, 'utf8')).not.toContain(secret);
   }, 60_000);
+
+  describe('Azure DevOps scope', () => {
+    const ADO_TOKEN = 'ado_fake_for_test';
+    const repo = (name: string, extra: Record<string, unknown> = {}) => ({
+      name,
+      project: { name: 'Platform' },
+      defaultBranch: 'refs/heads/main',
+      size: 1024,
+      ...extra,
+    });
+
+    afterEach(() => {
+      vi.unstubAllEnvs();
+      nock.cleanAll();
+      nock.enableNetConnect();
+    });
+
+    it('sizes through ADOPAT and writes the same CSV columns as GitHub', async () => {
+      nock.disableNetConnect();
+      const pulls = /\/Platform\/_apis\/git\/repositories\/api\/pullrequests/;
+      nock('https://dev.azure.com')
+        .get('/acme/_apis/git/repositories')
+        .query(true)
+        .reply(200, {
+          value: [repo('api'), repo('legacy'), repo('blank', { defaultBranch: undefined })],
+        })
+        // The first repo's PRs are fetched twice: fail-fast probe, then its own.
+        .get(pulls)
+        .query((q) => q['$skip'] === '0')
+        .times(2)
+        .reply(200, {
+          value: [
+            {
+              pullRequestId: 7,
+              status: 'completed',
+              creationDate: '2026-07-01T00:00:00.1234567Z',
+              createdBy: { id: 'user-1' },
+            },
+          ],
+        })
+        .get(pulls)
+        .query((q) => q['$skip'] === '1')
+        .times(2)
+        .reply(200, { value: [] });
+
+      // Real enumerator over mocked HTTP, but cloning from the local fixture.
+      const real = new AzureDevOpsEnumerator(ADO_TOKEN, 'acme');
+      vi.mocked(createEnumerator).mockClear();
+      vi.mocked(createEnumerator).mockReturnValue({
+        enumerate: async (scope, opts) =>
+          (await real.enumerate(scope, opts)).map((r) => ({
+            ...r,
+            cloneUrl: `file://${bareRepoPath}`,
+          })),
+        fetchPullRequestStats: (name, o) => real.fetchPullRequestStats(name, o),
+      });
+      vi.stubEnv('GHPAT', 'ghp_must_not_be_used');
+      vi.stubEnv('ADOPAT', ADO_TOKEN);
+
+      const result = await runSizeCommand({
+        scope: 'azure:org=acme',
+        format: 'csv',
+        quiet: true,
+        ignoreRepos: 'platform/legacy',
+        output: join(workTreePath, 'azure-sized.csv'),
+        now: new Date('2026-08-01T00:00:00Z'),
+      });
+
+      expect(createEnumerator).toHaveBeenCalledWith(
+        { provider: 'azure', organization: 'acme' },
+        ADO_TOKEN
+      );
+      // legacy is ignored; blank is an empty repo, so included=false.
+      expect(result.rows.map((r) => r.full_name)).toEqual(['Platform/api']);
+      expect(result.rows[0]).toMatchObject({
+        error: '',
+        counted_files: 3,
+        prs_last_3m: 1,
+        pr_authors_last_3m: 1,
+        last_pr_at: '2026-07-01T00:00:00Z',
+      });
+      expect(result.output.split('\n')[0]).toBe(writeSizedCsv([]).split('\n')[0]);
+      expect(nock.pendingMocks()).toEqual([]);
+    }, 60_000);
+
+    it('reads only the scope provider\'s token variable', async () => {
+      vi.stubEnv('GHPAT', 'ghp_must_not_be_used');
+      vi.stubEnv('ADOPAT', '');
+      await expect(
+        runSizeCommand({ scope: 'azure:org=acme', format: 'csv', quiet: true })
+      ).rejects.toThrow(/Missing Azure DevOps PAT.*ADOPAT/s);
+
+      // A malformed GitHub scope still reports the missing token first.
+      vi.stubEnv('GHPAT', '');
+      await expect(
+        runSizeCommand({ scope: 'bad scope!!', format: 'csv', quiet: true })
+      ).rejects.toThrow(/Missing GitHub PAT/);
+    });
+  });
 });

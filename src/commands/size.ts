@@ -5,7 +5,7 @@
  *                                         →  enumerate repos via SCM
  *   apply default included + ignored repos + optional interactive deselect
  *                                         →  pLimit(5) per repo:
- *                                              fetchPullRequestStats (GitHub GraphQL)
+ *                                              fetchPullRequestStats (GitHub GraphQL / Azure DevOps REST)
  *                                              partialClone
  *                                              analyseFiles
  *                                              analyseActivity (skipped if --no-activity)
@@ -29,11 +29,13 @@ import {
   DEFAULT_SCOPE_NOTICE,
   createEnumerator,
   resolveScope,
+  scopeProvider,
 } from '../scm/factory.js';
 import {
   isPullRequestCapable,
   type RepoListing,
   type ScmEnumerator,
+  type ScmScope,
 } from '../scm/types.js';
 import { listingToRow } from './list.js';
 import { writeSizedCsv, type RepoListRow, type RepoSizedRow } from '../reporting/csv.js';
@@ -55,6 +57,9 @@ import { interactiveDeselect } from '../filtering/interactive.js';
 
 const DEFAULT_CONCURRENCY = 5;
 const FULL_NAME_RE = /^[A-Za-z0-9._-]+\/[A-Za-z0-9._-]+$/;
+// Azure DevOps project and repo names may contain spaces and non-ASCII
+// characters; only the separators (`/`, `,`) are off limits.
+const AZURE_FULL_NAME_RE = /^[^/,]+\/[^/,]+$/;
 
 export type SizeOutputFormat = 'csv' | 'table';
 
@@ -68,7 +73,7 @@ export interface SizeCommandOptions {
   concurrency?: number;
   noActivity?: boolean;
   interactive?: boolean;
-  /** Comma-separated exact full names to skip before cloning, e.g. "acme/a,acme/b". */
+  /** Comma-separated exact full names to skip before cloning, e.g. "acme/a,acme/b" (Azure DevOps: "project/repo"). */
   ignoreRepos?: string;
 
   /** Forwarded to enumerator when --scope is used. */
@@ -95,8 +100,11 @@ export interface SizeCommandResult {
 export async function runSizeCommand(
   options: SizeCommandOptions
 ): Promise<SizeCommandResult> {
-  const ignoredRepos = parseIgnoredRepos(options.ignoreRepos);
-  const { token } = await preflight({ tokenFlag: options.token });
+  // preflight only needs the provider (to pick GHPAT vs ADOPAT), so peek at the
+  // raw --scope prefix; the full parse still happens after it.
+  const provider = scopeProvider(options.scope);
+  const ignoredRepos = parseIgnoredRepos(options.ignoreRepos, provider);
+  const { token } = await preflight({ tokenFlag: options.token, provider });
 
   // 1. Enumerate and resolve list rows.
   const { scope, usedDefault } = resolveScope(options.scope);
@@ -222,7 +230,10 @@ function defaultFormatFor(outputPath: string | undefined): SizeOutputFormat {
   return 'csv';
 }
 
-export function parseIgnoredRepos(raw: string | undefined): Set<string> {
+export function parseIgnoredRepos(
+  raw: string | undefined,
+  provider: ScmScope['provider'] = 'github'
+): Set<string> {
   if (!raw || raw.trim() === '') return new Set();
 
   const parts = raw.split(',');
@@ -234,7 +245,7 @@ export function parseIgnoredRepos(raw: string | undefined): Set<string> {
         '--ignore-repos contains an empty entry. Use comma-separated owner/repo names, e.g. "acme/api,acme/web".'
       );
     }
-    if (!FULL_NAME_RE.test(repo)) {
+    if (!(provider === 'azure' ? AZURE_FULL_NAME_RE : FULL_NAME_RE).test(repo)) {
       throw new Error(
         `--ignore-repos entries must be full repository names like "owner/repo" (got "${repo}").`
       );
@@ -377,7 +388,8 @@ async function fetchPrStats(
   if (!isPullRequestCapable(enumerator)) {
     throw new PullRequestFetchError(
       `Pull-request sizing is not supported for this SCM provider. ` +
-        `GitHub PATs require Repository permission "Pull requests: Read-only".`
+        `GitHub PATs require Repository permission "Pull requests: Read-only". ` +
+        `Azure DevOps PATs require the scope "Code (Read)".`
     );
   }
   return enumerator.fetchPullRequestStats(fullName, now ? { now } : {});

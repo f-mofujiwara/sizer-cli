@@ -45,9 +45,9 @@ function makeProgram(): Command {
     .version(VERSION)
     .option(
       '-s, --scope <spec>',
-      'GitHub owner/login to include, e.g. "acme" or "john-smith" (default: all visible repos, acme+john-smith)'
+      'GitHub owner/login to include, e.g. "acme" or "john-smith" (default: all visible repos, acme+john-smith); Azure DevOps: "azure:org=<org>[/project=<project>]"'
     )
-    .option('-t, --token <pat>', 'GitHub PAT (or env GHPAT)')
+    .option('-t, --token <pat>', 'GitHub PAT (or env GHPAT); Azure DevOps PAT (or env ADOPAT)')
     .option('--list-only', 'enumerate repos and write the list CSV to stdout without cloning', false)
     .option('-o, --output <path>', 'write sizing output to this file (default: stdout)')
     .addOption(
@@ -55,7 +55,7 @@ function makeProgram(): Command {
         .choices(['csv', 'table'])
     )
     .option('-i, --interactive', 'show a checkbox prompt to deselect repos before sizing (requires a TTY)', false)
-    .option('--ignore-repos <repos>', 'comma-separated owner/repo names to skip before sizing')
+    .option('--ignore-repos <repos>', 'comma-separated owner/repo names to skip before sizing (Azure DevOps: project/repo)')
     .option('--no-activity', 'skip git log calls (sizing only)')
     .option('-c, --concurrency <n>', 'parallel repos (default 5)', (v) => parseInt(v, 10))
     .option('-q, --quiet', 'suppress per-repo progress lines on stderr', false)

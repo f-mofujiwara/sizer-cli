@@ -2,10 +2,12 @@
 
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
+import type { ScmScope } from './scm/types.js';
 
 const execFileAsync = promisify(execFile);
 
 export const ENV_TOKEN = 'GHPAT';
+export const ENV_TOKEN_AZURE = 'ADOPAT';
 
 export class PreflightError extends Error {
   constructor(message: string) {
@@ -21,6 +23,8 @@ export interface PreflightResult {
 export interface PreflightOptions {
   /** PAT supplied via `--token` flag (highest precedence). */
   tokenFlag?: string;
+  /** Provider of the resolved scope; picks the env var. Defaults to GitHub. */
+  provider?: ScmScope['provider'];
   /** Test override — replaces process.env. */
   env?: NodeJS.ProcessEnv;
   /** Test override — invoked instead of `git --version`. */
@@ -32,7 +36,7 @@ export async function preflight(
 ): Promise<PreflightResult> {
   const env = options.env ?? process.env;
 
-  const token = resolveToken(options.tokenFlag, env);
+  const token = resolveToken(options.tokenFlag, env, options.provider);
   installLogRedactor();
   await ensureGitAvailable(options.checkGit);
 
@@ -41,21 +45,29 @@ export async function preflight(
 
 export function resolveToken(
   tokenFlag: string | undefined,
-  env: NodeJS.ProcessEnv
+  env: NodeJS.ProcessEnv,
+  provider: ScmScope['provider'] = 'github'
 ): string {
   if (tokenFlag && tokenFlag.length > 0) return tokenFlag;
-  const fromEnv = env[ENV_TOKEN];
+  const envName = provider === 'azure' ? ENV_TOKEN_AZURE : ENV_TOKEN;
+  const fromEnv = env[envName];
   if (fromEnv && fromEnv.length > 0) return fromEnv;
   throw new PreflightError(
-    `Missing GitHub PAT. Pass --token <pat> or set ${ENV_TOKEN}.\n` +
+    `Missing ${provider === 'azure' ? 'Azure DevOps' : 'GitHub'} PAT. Pass --token <pat> or set ${envName}.\n` +
       `\n` +
-      `To create a fine-grained PAT:\n` +
-      `  1. https://github.com/settings/personal-access-tokens/new\n` +
-      `  2. Repository access: All repositories (or select the target org's repos)\n` +
-      `  3. Permissions ▸ Repository ▸ Metadata: Read-only (auto-included)\n` +
-      `  4. Permissions ▸ Repository ▸ Contents: Read-only\n` +
-      `  5. Permissions ▸ Repository ▸ Pull requests: Read-only\n` +
-      `  6. Generate, copy, and re-run with --token <pat> or export ${ENV_TOKEN}=<pat>.`
+      (provider === 'azure'
+        ? `To create a PAT:\n` +
+          `  1. https://dev.azure.com/<org>/_usersSettings/tokens ▸ New Token\n` +
+          `  2. Organization: the one you are sizing\n` +
+          `  3. Scopes: Custom defined ▸ Code: Read (nothing else)\n` +
+          `  4. Create, copy, and re-run with --token <pat> or export ${envName}=<pat>.`
+        : `To create a fine-grained PAT:\n` +
+          `  1. https://github.com/settings/personal-access-tokens/new\n` +
+          `  2. Repository access: All repositories (or select the target org's repos)\n` +
+          `  3. Permissions ▸ Repository ▸ Metadata: Read-only (auto-included)\n` +
+          `  4. Permissions ▸ Repository ▸ Contents: Read-only\n` +
+          `  5. Permissions ▸ Repository ▸ Pull requests: Read-only\n` +
+          `  6. Generate, copy, and re-run with --token <pat> or export ${envName}=<pat>.`)
   );
 }
 

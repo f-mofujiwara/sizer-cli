@@ -12,7 +12,8 @@ activity windows, file-count facts, and commit activity.
 
 - Nothing contacts Dam Secure servers. The container only talks to GitHub:
   `api.github.com` to enumerate repos and pull requests, and `github.com` to
-  fetch git metadata.
+  fetch git metadata. With an Azure DevOps scope it talks only to
+  `dev.azure.com`.
 - Repositories are not fully cloned or checked out. The sizer uses partial
   clones with `--filter=blob:none --no-checkout`, so it fetches `.git` tree and
   commit metadata, not source file contents.
@@ -24,9 +25,11 @@ activity windows, file-count facts, and commit activity.
 ## What You Need
 
 - Docker, Docker Desktop, Colima, Podman, or another Docker-compatible runtime.
-- A GitHub personal access token with read access to the repositories you want
-  sized (see [Authentication](#authentication) for the exact permissions).
-- Network access from the container to `api.github.com` and `github.com`.
+- A GitHub (or Azure DevOps) personal access token with read access to the
+  repositories you want sized (see [Authentication](#authentication) for the
+  exact permissions).
+- Network access from the container to `api.github.com` and `github.com`
+  (Azure DevOps: `dev.azure.com`).
 
 ## Quick Start
 
@@ -89,6 +92,16 @@ docker run --rm \
   --ignore-repos <owner>/legacy,<owner>/demo
 ```
 
+Size an Azure DevOps Services organisation, or one project in it. The token
+comes from `ADOPAT`, and repos are named `<project>/<repo>`:
+
+```bash
+docker run --rm \
+  -e ADOPAT \
+  ghcr.io/dam-secure/sizer-cli:latest \
+  --scope azure:org=<org>[/project=<project>]
+```
+
 Write directly from the container to a mounted output directory:
 
 ```bash
@@ -131,8 +144,8 @@ docker run --rm damsecure-sizer:local --help
 
 ## Authentication
 
-The container reads the GitHub token from `GHPAT`, or from `--token <pat>` if
-you prefer to pass it as a CLI option.
+The container reads the GitHub token from `GHPAT` (Azure DevOps: `ADOPAT`), or
+from `--token <pat>` if you prefer to pass it as a CLI option.
 
 Recommended:
 
@@ -177,6 +190,17 @@ https://github.com/settings/personal-access-tokens
 Classic PATs also work with `repo` (private) or `public_repo` (public only),
 but fine-grained tokens are preferred.
 
+### Azure DevOps PAT
+
+1. Open [Personal access tokens](https://learn.microsoft.com/en-us/azure/devops/organizations/accounts/use-personal-access-tokens-to-authenticate)
+   in your organisation and create a new token.
+2. Set **Organization** to the one you want sized.
+3. Choose **Custom defined** scopes and tick only **Code → Read**. It covers
+   listing repos, listing pull requests, and the clone. Grant nothing else.
+4. Copy the token and export it as `ADOPAT`.
+
+After the run, revoke the token from the same page.
+
 ## Output
 
 CSV is the artifact to share. A table is used when no `--output` is
@@ -215,9 +239,9 @@ The terminal table uses the same column names and order as the CSV.
 
 For each included repository, the sizer:
 
-1. Enumerates repositories through the GitHub API.
-2. Fetches all pull requests via the GitHub GraphQL API (open, closed, and
-   merged).
+1. Enumerates repositories through the GitHub API (Azure DevOps: REST API).
+2. Fetches all pull requests via the GitHub GraphQL API (Azure DevOps: REST
+   API) (open, closed, and merged).
 3. Aggregates PR and author counts over 1w / 4w / 3m / 12m / 24m windows.
 4. Partial-clones each selected repo with `--filter=blob:none --no-checkout`.
 5. Counts paths from git tree metadata.
@@ -228,8 +252,8 @@ For each included repository, the sizer:
 
 ## Privacy
 
-- The tool contacts GitHub only: `api.github.com` for enumeration and PR
-  metadata, and `github.com` for cloning.
+- The tool contacts GitHub only (`api.github.com`, `github.com`), or
+  `dev.azure.com` for an Azure DevOps scope.
 - Nothing phones home to Dam Secure.
 - Source blobs are not checked out. The clone fetches tree and commit metadata.
 - Temporary clones live inside the container and are deleted after each repo.
@@ -243,6 +267,9 @@ If `--scope` is omitted, the sizer considers all repos visible to the
 authenticated PAT. Use `--scope <owner>` to keep only repos whose full name
 starts with `<owner>/`, for example `dam-secure/backend` or
 `patrickcollins12/repo1`.
+
+For Azure DevOps use `--scope azure:org=<org>` for every project in the
+organisation, or `--scope azure:org=<org>/project=<project>` for one.
 
 Run `--help` to see every supported option:
 
@@ -277,7 +304,8 @@ docker run --rm damsecure-sizer --help
 - AI-driven production exclusions
 - SLOC or per-language breakdowns
 - GitHub App authentication
-- GitLab, Bitbucket, and Azure DevOps execution in v1
+- GitLab and Bitbucket execution
+- Azure DevOps Server (on-premises); only Azure DevOps Services is supported
 
 ## License
 

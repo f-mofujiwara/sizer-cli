@@ -14,6 +14,7 @@ import {
   DEFAULT_SCOPE_NOTICE,
   createEnumerator,
   resolveScope,
+  scopeProvider,
 } from '../scm/factory.js';
 import { defaultIncluded, type RepoListing } from '../scm/types.js';
 import { writeListCsv, type RepoListRow } from '../reporting/csv.js';
@@ -49,7 +50,12 @@ export function listingToRow(repo: RepoListing): RepoListRow {
 export async function runListCommand(
   options: ListCommandOptions
 ): Promise<ListCommandResult> {
-  const { token } = await preflight({ tokenFlag: options.token });
+  // preflight only needs the provider (to pick GHPAT vs ADOPAT), so peek at the
+  // raw --scope prefix; the full parse still happens after it.
+  const { token } = await preflight({
+    tokenFlag: options.token,
+    provider: scopeProvider(options.scope),
+  });
   const { scope, usedDefault } = resolveScope(options.scope);
   if (usedDefault) process.stderr.write(DEFAULT_SCOPE_NOTICE);
   const enumerator = createEnumerator(scope, token);

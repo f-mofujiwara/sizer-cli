@@ -45,6 +45,14 @@ describe('makeProgram (commander wiring)', () => {
     expect(help).not.toContain('Commands:');
   });
 
+  it('help mentions the Azure DevOps scope and token env', () => {
+    const help = makeProgram().helpInformation();
+    const flat = help.replace(/\s+/g, ' ');
+    expect(flat).toContain('azure:org=<org>[/project=<project>]');
+    expect(flat).toContain('GitHub PAT (or env GHPAT); Azure DevOps PAT (or env ADOPAT)');
+    expect(flat).toContain('(default: all visible repos, acme+john-smith)');
+  });
+
   it('--format choices are csv | table on the root command', () => {
     const program = makeProgram();
     const fmt = program.options.find((o) => o.long === '--format')!;

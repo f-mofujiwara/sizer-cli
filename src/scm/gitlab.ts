@@ -18,7 +18,7 @@ export class GitLabEnumerator implements ScmEnumerator {
   // eslint-disable-next-line @typescript-eslint/no-unused-vars
   async enumerate(_scope: ScmScope, _opts: EnumerateOptions): Promise<RepoListing[]> {
     throw new Error(
-      'GitLab support is planned for v2; not implemented yet. Please open an issue or use --scope github=... in the meantime.'
+      'GitLab support is planned for v2; not implemented yet. Please open an issue or use --scope github:acme (or just --scope acme) in the meantime.'
     );
   }
 }
