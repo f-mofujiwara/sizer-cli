@@ -24,6 +24,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
 import { parseIgnoredRepos, runSizeCommand } from '../commands/size.js';
+import { EMPTY_PR_STATS } from '../analyse/pullRequests.js';
 
 vi.mock('../scm/factory.js', async (importActual) => {
   const actual: typeof import('../scm/factory.js') = await importActual();
@@ -234,5 +235,38 @@ describe('runSizeCommand — end-to-end against a local bare fixture', () => {
       error: '',
     });
     expect(result.output).not.toContain('ambiguous argument');
+  }, 60_000);
+
+  it('scrubs an authenticated clone URL from the error column and the -o file', async () => {
+    const secret = 'ghp_leakedleakedleakedleakedleakedleaked';
+    // git echoes the URL in its failure message, as it does for a real remote.
+    vi.mocked(createEnumerator).mockReturnValue({
+      enumerate: async () => [
+        {
+          fullName: 'acme/leaky',
+          cloneUrl: `file:///nonexistent/x-access-token:${secret}@github.com/acme/leaky`,
+          defaultBranch: 'main',
+          sizeKb: 0,
+          pushedAt: '',
+          isArchived: false,
+          isFork: false,
+          isEmpty: false,
+        },
+      ],
+      fetchPullRequestStats: async () => EMPTY_PR_STATS,
+    });
+    const outputPath = join(workTreePath, 'leak-sized.csv');
+
+    process.env.GHPAT = 'ghp_fake_for_test';
+    const result = await runSizeCommand({
+      scope: 'acme',
+      format: 'csv',
+      quiet: true,
+      output: outputPath,
+    });
+
+    expect(result.rows[0].error).toContain('x-access-token:***@');
+    expect(result.rows[0].error).not.toContain(secret);
+    expect(await readFile(outputPath, 'utf8')).not.toContain(secret);
   }, 60_000);
 });

@@ -24,7 +24,7 @@ import {
   UNAVAILABLE_PR_STATS,
   type PullRequestStats,
 } from '../analyse/pullRequests.js';
-import { preflight } from '../preflight.js';
+import { preflight, redactString } from '../preflight.js';
 import {
   DEFAULT_SCOPE_NOTICE,
   createEnumerator,
@@ -203,6 +203,10 @@ async function finalise(
       output = renderSizedTable(rows);
       break;
   }
+
+  // A failed clone's message can carry the authenticated URL; the stream
+  // redactor never sees what goes to --output, so scrub it here.
+  output = redactString(output);
 
   if (options.output) {
     await writeFile(options.output, output, 'utf8');
@@ -485,7 +489,7 @@ function errorRow(
     committers_last_13w: -1,
     committers_last_52w: -1,
     activity_unavailable: true,
-    error: message,
+    error: redactString(message),
   };
 }
 
@@ -498,5 +502,5 @@ export async function writeSizeOutput(
   rendered: string
 ): Promise<void> {
   if (!options.output) return;
-  await writeFile(options.output, rendered, 'utf8');
+  await writeFile(options.output, redactString(rendered), 'utf8');
 }
