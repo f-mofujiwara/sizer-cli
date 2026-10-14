@@ -71,13 +71,23 @@ describe('createWorkspace + reserveRepo + releaseRepo', () => {
     expect(s.isDirectory()).toBe(true);
 
     const reserved = await ws.reserveRepo('acme/api');
-    expect(reserved).toBe(`${ws.rootDir}/acme_api`);
+    expect(reserved).toMatch(new RegExp(`^${ws.rootDir}/acme_api-[0-9a-f]{8}$`));
     // reserveRepo doesn't create the dir (git clone does); it just clears any
     // pre-existing scaffolding. So the dir should NOT exist now.
     await expect(stat(reserved)).rejects.toThrow();
 
     await ws.destroy();
     await expect(stat(ws.rootDir)).rejects.toThrow();
+  });
+
+  it('gives names that sanitise to the same string different directories', async () => {
+    expect(sanitiseRepoName('日本語/リポ')).toBe(sanitiseRepoName('別名/別リポ'));
+    const ws = await createWorkspace();
+    const a = await ws.reserveRepo('日本語/リポ');
+    const b = await ws.reserveRepo('別名/別リポ');
+    expect(a).not.toBe(b);
+    expect(await ws.reserveRepo('日本語/リポ')).toBe(a);
+    await ws.destroy();
   });
 
   it('reserveRepo wipes any pre-existing directory at the target path', async () => {

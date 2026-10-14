@@ -15,6 +15,7 @@
 
 import { mkdir, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
+import { createHash } from 'node:crypto';
 import { join } from 'node:path';
 
 let processCleanupRegistered = false;
@@ -51,7 +52,7 @@ export async function createWorkspace(): Promise<WorkspaceHandle> {
       if (destroyed) {
         throw new Error('reserveRepo called on a destroyed workspace');
       }
-      const sanitised = sanitiseRepoName(repoFullName);
+      const sanitised = repoDirName(repoFullName);
       const repoDir = join(rootDir, sanitised);
       // If a previous attempt left scaffolding, clear it so the clone has a
       // pristine target.
@@ -79,6 +80,16 @@ export async function createWorkspace(): Promise<WorkspaceHandle> {
  */
 export function sanitiseRepoName(fullName: string): string {
   return fullName.toLowerCase().replace(/[^a-z0-9._-]+/g, '_');
+}
+
+/**
+ * Directory name for a repo: the readable sanitised name plus a short hash of
+ * the exact full name. Sanitising is lossy (every non-ASCII name collapses to
+ * underscores), and two repos sharing a directory would wipe each other's clone.
+ */
+export function repoDirName(fullName: string): string {
+  const hash = createHash('sha1').update(fullName).digest('hex').slice(0, 8);
+  return `${sanitiseRepoName(fullName)}-${hash}`;
 }
 
 /**
